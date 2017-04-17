@@ -105,9 +105,9 @@ class AsyncFetch(TCPConnectorMixIn):
                 time.sleep(self.retry_timeout)
                 return self.go()
             else:
-                raise Exception(_('Failed to connect %s service.' % self.service_name or 'api'))
+                raise Exception(_('Failed to connect to %s service' % self.service_name or 'api'))
         except ValueError:
-            raise Exception(_('Failed to receive data from %s service.' % self.service_name or 'api'))
+            raise Exception(_('Failed to receive data from %s service' % self.service_name or 'api'))
 
     def go_single(self, bundle) -> FetchResult:
         with self.get_client_session() as session:

@@ -1,6 +1,5 @@
-from pprint import pprint
-
 import pytest
+
 from vault_mods.system import System
 from . import settings
 
@@ -16,6 +15,12 @@ def system_instance():
 
 # noinspection PyMethodMayBeStatic,PyShadowingNames
 class SystemBackendTest:
+    def test_seal(self, system_instance: System):
+        system_instance.seal()
+
+    def test_unseal(self, system_instance: System):
+        system_instance.unseal(settings.TRANSIT['UNSEAL_KEYS'][0])
+        system_instance.unseal_many(settings.TRANSIT['UNSEAL_KEYS'])
 
     def test_list_mounts(self, system_instance: System):
         system_instance.list_mounts()
@@ -54,3 +59,4 @@ class SystemBackendTest:
         lolkey = transit.get_key('lol')
         lolkey.create_key()
         lolkey.encrypt_data('yaaa')
+

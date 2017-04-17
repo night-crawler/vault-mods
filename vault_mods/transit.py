@@ -1,13 +1,11 @@
 import os
 import typing as t
-from base64 import b32encode
-
-from pprint import pprint
 
 from collections import OrderedDict, namedtuple
 from vault_mods.api_base import VaultAPIBase
-from vault_mods.utils import is_success, b64_encode, b64_decode, b64_dict_encode, b32_encode, chunkwise, b32_decode, \
-    restore_padding
+from vault_mods.utils import (
+    is_success, b64_encode, b64_decode, b64_dict_encode, b32_encode, b32_decode, restore_padding
+)
 from vault_mods import enums
 
 str_or_bytes = t.Union[str, bytes]
@@ -65,6 +63,8 @@ class TransitKey(VaultAPIBase):
 
     EncryptionKeyType = enums.EncryptionKeyType
     ExportKeyType = enums.ExportKeyType
+    DigestAlgorithm = enums.DigestAlgorithm
+    DigestOutputFormat = enums.DigestOutputFormat
 
     info = None
     name = None
@@ -84,6 +84,8 @@ class TransitKey(VaultAPIBase):
                 'encrypt': os.path.join(self.transit_url, 'encrypt', name),
                 'decrypt': os.path.join(self.transit_url, 'decrypt', name),
                 'rotate': os.path.join(self.transit_url, 'keys', name, 'rotate'),
+                'rewrap': os.path.join(self.transit_url, 'rewrap', name),
+                'sign': os.path.join(self.transit_url, 'sign', name),
             },
         }
         super(TransitKey, self).__init__(
@@ -97,7 +99,7 @@ class TransitKey(VaultAPIBase):
     def read_key(self) -> KeyInfo:
         response = self.af.go_single(self.read_key_task())
         if not is_success(response.status):
-            raise Exception()
+            raise Exception(response)
         self.info = self.KeyInfo(**response.result['data'])
         return self.info
 
@@ -105,19 +107,23 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(self.url('key', 'read'))
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- create_key ----------------
-    def create_key(self, key_type: enums.EncryptionKeyType = None,
-                   convergent_encryption: bool = False, derived: bool = False, exportable: bool = False):
+    def create_key(self,
+                   key_type: enums.EncryptionKeyType = None,
+                   convergent_encryption: bool = False,
+                   derived: bool = False,
+                   exportable: bool = False):
         task_bundle = self.create_key_task(key_type, convergent_encryption, derived, exportable)
         response = self.af.go_single(task_bundle)
         if not is_success(response.status):
             raise Exception(response)
-        assert response.status == 204
         return response.result
 
-    def create_key_task(self, key_type: enums.EncryptionKeyType = None,
-                        convergent_encryption: bool = False, derived: bool = False, exportable: bool = False) -> dict:
+    def create_key_task(self,
+                        key_type: enums.EncryptionKeyType = None,
+                        convergent_encryption: bool = False,
+                        derived: bool = False,
+                        exportable: bool = False) -> dict:
         if key_type and key_type not in self.EncryptionKeyType:
             raise ValueError(key_type)
         data_bundle = {
@@ -130,13 +136,11 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(self.url('key', 'create'), method='post', data=data_bundle)
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- config_key ----------------
     def config_key(self, min_decryption_version: int = None, deletion_allowed: bool = None):
         response = self.af.go_single(self.config_key_task(min_decryption_version, deletion_allowed))
         if not is_success(response.status):
             raise Exception(response)
-        pprint(response.headers)
         return response.result
 
     def config_key_task(self, min_decryption_version: int = None, deletion_allowed: bool = None) -> dict:
@@ -149,7 +153,6 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(self.url('key', 'config'), method='post', data=data_bundle)
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- delete_key ----------------
     def delete_key(self) -> None:
         return self.af.go_single(self.delete_key_task()).result
@@ -158,7 +161,6 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(self.url('key', 'delete'), method='delete')
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- rotate_key ----------------
     def rotate_key(self) -> None:
         response = self.af.go_single(self.rotate_key_task())
@@ -170,13 +172,12 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(self.url('key', 'rotate'), method='post')
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- export_key ----------------
     def export_key(self, key_type: enums.ExportKeyType, version: int = 0) -> dict:
         response = self.af.go_single(self.export_key_task(key_type, version))
         if not is_success(response.status):
             raise Exception(response)
-        return response.result
+        return response.result['data']
 
     def export_key_task(self, key_type: enums.ExportKeyType, version: int = 0):
         if key_type not in self.ExportKeyType:
@@ -188,7 +189,6 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(url, method='get')
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- encrypt_b64 ----------------
     def encrypt_b64(self,
                     b64_plain_text: str = '',
@@ -220,7 +220,6 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(url, data=data_bundle, method='post')
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- encrypt_data ----------------
     def encrypt_data(self,
                      plain_text: str_or_bytes,
@@ -239,7 +238,6 @@ class TransitKey(VaultAPIBase):
         }))
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- encrypt_batch ----------------
     def encrypt_batch(self, plain_data_bundle: t.List[str_dict__or__bytes_or_str]) -> t.List[str_dict]:
         response = self.af.go_single(self.encrypt_batch_task(plain_data_bundle))
@@ -292,7 +290,6 @@ class TransitKey(VaultAPIBase):
         return self.mk_task_bundle(url, data=data_bundle, method='post')
 
     # ------------------------------------------------------------------------------------------------------------------
-
     # ---------------- decrypt_data ----------------
     def decrypt_data(self,
                      ciphertext: str,
@@ -334,43 +331,7 @@ class TransitKey(VaultAPIBase):
         return self.decrypt_b64_task(batch_input=batch)
 
     # ------------------------------------------------------------------------------------------------------------------
-
-    def encrypt_files_task(self,
-                           file_bundles_list: t.List[str_dict_or_str],
-                           do_encrypt_file_names: bool = False) -> dict:
-        """
-        :param do_encrypt_file_names: default for encrypt file names and encode encrypted data with base32
-        :param file_bundles_list: [
-            {
-                'file': '/var/file',
-                'data_context': 'ct1', 
-                'data_nonce: 'n1',
-                'name_context': 'ct2', 
-                'name_nonce': 'n2',
-            },
-            '/var/www/file.txt',
-        ] 
-        :return: [] batch list
-        """
-        batch_data, batch_file_names = [], []
-        for bundle in file_bundles_list:
-            abspath = os.path.abspath(bundle['file'])
-            filename = os.path.basename(abspath)
-            batch_data.append({
-                'plaintext': open(bundle['file'], 'rb').read(),
-                'context': bundle.get('data_context'),
-                'nonce': bundle.get('data_nonce')
-            })
-            if bundle.get('encrypt_file_name', do_encrypt_file_names):
-                batch_file_names.append({
-                    'plaintext': filename,
-                    'context': bundle.get('name_context'),
-                    'nonce': bundle.get('name_nonce')
-                })
-
-        # file names placed after file data
-        return self.encrypt_batch_task(batch_data + batch_file_names)
-
+    # ---------------- encrypt_files ----------------
     def encrypt_files(self,
                       file_bundles_list: t.List[str_dict_or_str],
                       output_dir: str = '',
@@ -438,9 +399,84 @@ class TransitKey(VaultAPIBase):
             encrypted_files.append(_file)
         return encrypted_files
 
-    def decrypt_files_task(self,
+    def encrypt_files_task(self,
                            file_bundles_list: t.List[str_dict_or_str],
-                           do_decrypt_file_names: bool = False):
+                           do_encrypt_file_names: bool = False) -> dict:
+        """
+        :param do_encrypt_file_names: default for encrypt file names and encode encrypted data with base32
+        :param file_bundles_list: [
+            {
+                'file': '/var/file',
+                'data_context': 'ct1', 
+                'data_nonce: 'n1',
+                'name_context': 'ct2', 
+                'name_nonce': 'n2',
+            },
+            '/var/www/file.txt',
+        ] 
+        :return: [] batch list
+        """
+        batch_data, batch_file_names = [], []
+        for bundle in file_bundles_list:
+            abspath = os.path.abspath(bundle['file'])
+            filename = os.path.basename(abspath)
+            batch_data.append({
+                'plaintext': open(bundle['file'], 'rb').read(),
+                'context': bundle.get('data_context'),
+                'nonce': bundle.get('data_nonce')
+            })
+            if bundle.get('encrypt_file_name', do_encrypt_file_names):
+                batch_file_names.append({
+                    'plaintext': filename,
+                    'context': bundle.get('name_context'),
+                    'nonce': bundle.get('name_nonce')
+                })
+
+        # file names placed after file data
+        return self.encrypt_batch_task(batch_data + batch_file_names)
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # ---------------- decrypt_files ----------------
+    def decrypt_files(self,
+                      file_bundles_list: t.List[str_dict_or_str],
+                      do_decrypt_file_names: bool = False,
+                      output_dir: str = '',
+                      makedirs: bool = False) -> t.List[str]:
+        response = self.af.go_single(self.decrypt_files_task(file_bundles_list, do_decrypt_file_names))
+        if not is_success(response.status):
+            raise Exception(response)
+        decrypted_files_data = response.result['data']['batch_results'][:len(file_bundles_list)]
+        decrypted_file_names = response.result['data']['batch_results'][len(file_bundles_list):]
+
+        if makedirs:
+            os.makedirs(output_dir, exist_ok=True)
+
+        decrypted_files = []
+        dfn_i = 0  # decrypted file name index
+        for bundle, d_data in zip(file_bundles_list, decrypted_files_data):
+            abspath = os.path.abspath(bundle['file'])
+            version, filename = os.path.basename(abspath).split('_', 1)
+            filename = filename.split('.vault')[0]
+            dirname = os.path.dirname(abspath)
+            b_data = b64_decode(d_data['plaintext'])
+
+            if bundle.get('decrypt_file_name', do_decrypt_file_names):
+                filename = b64_decode(decrypted_file_names[dfn_i]['plaintext'], 'utf8')
+                dfn_i += 1
+
+            _output_dir = bundle.get('output_dir', output_dir) or dirname
+            if makedirs:
+                os.makedirs(_output_dir, exist_ok=True)
+
+            _file = os.path.join(_output_dir, filename)
+            with open(_file, 'wb') as f:
+                f.write(b_data)
+            decrypted_files.append(_file)
+        return decrypted_files
+
+    @staticmethod
+    def prepare_decrypt_batch_data(file_bundles_list: t.List[str_dict],
+                                   do_decrypt_file_names: bool = False) -> t.List[str_dict]:
         batch_data, batch_file_names = [], []
         for bundle in file_bundles_list:
             abspath = os.path.abspath(bundle['file'])
@@ -463,40 +499,128 @@ class TransitKey(VaultAPIBase):
                     'context': bundle.get('name_context'),
                     'nonce': bundle.get('name_nonce')
                 })
+        return batch_data + batch_file_names
 
-        return self.decrypt_batch_task(batch_data + batch_file_names)
+    def decrypt_files_task(self,
+                           file_bundles_list: t.List[str_dict],
+                           do_decrypt_file_names: bool = False) -> dict:
+        return self.decrypt_batch_task(
+            self.prepare_decrypt_batch_data(file_bundles_list, do_decrypt_file_names)
+        )
 
-    def decrypt_files(self,
-                      file_bundles_list: t.List[str_dict_or_str],
-                      do_decrypt_file_names: bool = False,
-                      output_dir: str = '',
-                      makedirs: bool = False):
-        response = self.af.go_single(self.decrypt_files_task(file_bundles_list, do_decrypt_file_names))
+    # ------------------------------------------------------------------------------------------------------------------
+    # ---------------- rewrap_b64 ----------------
+    def rewrap_b64(self,
+                   ciphertext: str = '',
+                   b64_context: str = '',
+                   b64_nonce: str = '',
+                   batch_input: t.List[t.Dict[str, str]] = None):
+        response = self.af.go_single(self.rewrap_b64_task(
+            ciphertext, b64_context, b64_nonce, batch_input
+        ))
         if not is_success(response.status):
             raise Exception(response)
-        decrypted_files_data = response.result['data']['batch_results'][:len(file_bundles_list)]
-        decrypted_file_names = response.result['data']['batch_results'][len(file_bundles_list):]
+        return response.result
 
-        if makedirs:
-            os.makedirs(output_dir, exist_ok=True)
+    def rewrap_b64_task(self,
+                        ciphertext: str = '',
+                        b64_context: str = '',
+                        b64_nonce: str = '',
+                        batch_input: t.List[t.Dict[str, str]] = None) -> dict:
+        url = self.url('key', 'rewrap')
+        data_bundle = {}
+        if batch_input:
+            data_bundle['batch_input'] = batch_input
+            return self.mk_task_bundle(url, data=data_bundle, method='post')
+        data_bundle['ciphertext'] = ciphertext
+        if b64_context:
+            data_bundle['context'] = b64_context
+        if b64_nonce:
+            data_bundle['nonce'] = b64_nonce
+        return self.mk_task_bundle(url, data=data_bundle, method='post')
 
-        dfn_i = 0  # decrypted file name index
-        for bundle, d_data in zip(file_bundles_list, decrypted_files_data):
-            abspath = os.path.abspath(bundle['file'])
-            version, filename = os.path.basename(abspath).split('_', 1)
-            filename = filename.split('.vault')[0]
-            dirname = os.path.dirname(abspath)
-            b_data = b64_decode(d_data['plaintext'])
+    # ------------------------------------------------------------------------------------------------------------------
+    # ---------------- rewrap_data_batch ----------------
+    def rewrap_data_batch(self, batch: t.List[str_dict__or__bytes_or_str]) -> t.List[str_dict]:
+        response = self.af.go_single(self.rewrap_b64_task(batch_input=batch))
+        if not is_success(response.status):
+            raise Exception(response)
+        return response.result['data']['batch_results']
 
-            if bundle.get('decrypt_file_name', do_decrypt_file_names):
-                filename = b64_decode(decrypted_file_names[dfn_i]['plaintext'], 'utf8')
-                dfn_i += 1
+    def rewrap_data_batch_task(self, batch: t.List[str_dict__or__bytes_or_str]) -> dict:
+        _batch = []
+        for bundle in batch:
+            _batch.append(dict(ciphertext=bundle['ciphertext'], **b64_dict_encode({
+                'b64_context': bundle.get('context'),
+                'b64_nonce': bundle.get('nonce'),
+            })))
 
-            _output_dir = bundle.get('output_dir', output_dir) or dirname
-            if makedirs:
-                os.makedirs(_output_dir, exist_ok=True)
+        return self.rewrap_b64_task(batch_input=_batch)
 
-            _file = os.path.join(_output_dir, filename)
-            with open(_file, 'wb') as f:
-                f.write(b_data)
+    # ------------------------------------------------------------------------------------------------------------------
+    # ---------------- rewrap_data ----------------
+    def rewrap_data(self,
+                    ciphertext: str = '',
+                    context: str = '',
+                    nonce: str = '') -> str:
+        response = self.af.go_single(self.rewrap_data_task(
+            ciphertext=ciphertext,
+            context=context,
+            nonce=nonce
+        ))
+        if not is_success(response.status):
+            raise Exception(response)
+        return response.result['data']['batch_results'][0]['ciphertext']
 
+    def rewrap_data_task(self,
+                         ciphertext: str = '',
+                         context: str = '',
+                         nonce: str = '') -> dict:
+        return self.rewrap_data_batch_task([{
+            'ciphertext': ciphertext,
+            'context': context,
+            'nonce': nonce
+        }])
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # ---------------- sign ----------------
+    def sign(self,
+             input_data: str_or_bytes,
+             output_format: enums.DigestOutputFormat = enums.DigestOutputFormat.HEX,
+             algorithm: enums.DigestAlgorithm = enums.DigestAlgorithm.SHA2_256):
+        response = self.af.go_single(self.sign_task(input_data, output_format, algorithm))
+        if not is_success(response.status):
+            raise Exception(response)
+        return response.result['data']['signature']
+
+    def sign_task(self,
+                  input_data: str_or_bytes,
+                  output_format: enums.DigestOutputFormat = enums.DigestOutputFormat.HEX,
+                  algorithm: enums.DigestAlgorithm = enums.DigestAlgorithm.SHA2_256):
+        if algorithm not in self.DigestAlgorithm:
+            raise ValueError(algorithm)
+        if output_format not in self.DigestOutputFormat:
+            raise ValueError(output_format)
+
+        return self.mk_task_bundle(self.url('key', 'sign'), {
+            'algorithm': algorithm.value,
+            'format': output_format.value,
+            'input': b64_encode(input_data)
+        }, method='post')
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # ----------------  ----------------
+    def rewrap_encrypted_files(self,
+                               file_bundles_list: t.List[str_dict],
+                               do_rewrap_file_names: bool = False):
+        response = self.af.go_single(
+            self.rewrap_encrypted_files_task(file_bundles_list, do_rewrap_file_names)
+        )
+        if not is_success(response.status):
+            raise Exception(response)
+
+    def rewrap_encrypted_files_task(self,
+                                    file_bundles_list: t.List[str_dict],
+                                    do_rewrap_file_names: bool = False):
+        decrypt_batch_list = self.prepare_decrypt_batch_data(file_bundles_list, do_rewrap_file_names)
+        return self.rewrap_data_batch_task(decrypt_batch_list)

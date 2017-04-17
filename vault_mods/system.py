@@ -1,5 +1,7 @@
 import os
 
+import typing as t
+
 from vault_mods.api_base import VaultAPIBase
 from vault_mods.utils import is_success
 from vault_mods import enums
@@ -27,6 +29,10 @@ class System(VaultAPIBase):
                 'mount': os.path.join(self.sys_url, 'mounts', '%(path)s'),
                 'config': os.path.join(self.sys_url, 'mounts', '%(path)s', 'tune'),
             },
+            'sealing': {
+                'unseal': os.path.join(self.sys_url, 'unseal'),
+                'seal': os.path.join(self.sys_url, 'seal'),
+            }
         }
         super().__init__(token=token, cafile=cafile, loop=loop, tcp_connector=tcp_connector, api_version=api_version)
 
@@ -109,3 +115,29 @@ class System(VaultAPIBase):
         return self.mk_task_bundle(url, method='post', data={
             'default_lease_ttl': default_lease_ttl, 'max_lease_ttl': max_lease_ttl
         })
+
+    def unseal_many(self, keys: t.List[str]) -> t.List:
+        responses = self.go_tasks(*[self.unseal_task(_key) for _key in keys]).values()
+        if not all(is_success(sub_response.status) for sub_response in responses):
+            raise Exception(responses)
+        return [sub_response.result for sub_response in responses]
+
+    def unseal(self, unseal_key: str):
+        response = self.af.go_single(self.unseal_task(unseal_key))
+        if not is_success(response.status):
+            raise Exception(response)
+        return response.result
+
+    def unseal_task(self, unseal_key: str) -> dict:
+        url = self.url('sealing', 'unseal')
+        return self.mk_task_bundle(url, method='post', data={'key': unseal_key})
+
+    def seal(self):
+        response = self.af.go_single(self.seal_task())
+        if not is_success(response.status):
+            raise Exception(response)
+        return response.result
+
+    def seal_task(self):
+        url = self.url('sealing', 'seal')
+        return self.mk_task_bundle(url, method='put')

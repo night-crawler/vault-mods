@@ -1,6 +1,18 @@
 from enum import Enum
 
 
+class DigestAlgorithm(Enum):
+    SHA2_224 = 'sha2-224'
+    SHA2_256 = 'sha2-256'
+    SHA2_384 = 'sha2-384'
+    SHA2_512 = 'sha2-512'
+
+
+class DigestOutputFormat(Enum):
+    HEX = 'hex'
+    BASE64 = 'base64'
+
+
 class SecretBackend(Enum):
     AWS = 'aws'
     Cassandra = 'cassandra'

@@ -1,8 +1,6 @@
 import os
 import pytest
 
-from glob import glob
-
 from vault_mods.transit import Transit, TransitKey
 from vault_mods.system import System
 from . import settings
@@ -35,10 +33,10 @@ def encryption_key(transit_instance: Transit):
 
 # noinspection PyShadowingNames
 @pytest.fixture(scope='module')
-def sign_key(transit_instance: Transit):
-    sign_key = transit_instance.get_key('sign_key')
-    sign_key.create_key(key_type=sign_key.EncryptionKeyType.ECDSA_P256, exportable=True)
-    return sign_key
+def signing_key(transit_instance: Transit):
+    k = transit_instance.get_key('test_sign_key')
+    k.create_key(key_type=k.EncryptionKeyType.ECDSA_P256, exportable=True)
+    return k
 
 
 # noinspection PyShadowingNames,PyMethodMayBeStatic
@@ -112,7 +110,6 @@ class TransitAPITest:
         res = encryption_key.decrypt_batch(ciphertext_data_bundle=ciphers)
 
     def test_encrypt_files(self, encryption_key: TransitKey):
-        dirname = os.path.dirname(os.path.abspath(__file__))
         files = [
             {
                 'file': __file__,
@@ -149,9 +146,58 @@ class TransitAPITest:
             },
         ]
 
-        encryption_key.decrypt_files(
+        _decrypted = encryption_key.decrypt_files(
             decrypt_files,
             output_dir=DECRYPTED_DATA_DIR,
             makedirs=True
         )
-        encrypted = encryption_key.encrypt_files([{'file': __file__}])
+        [os.remove(file) for file in set(_decrypted)]
+
+        _encrypted = encryption_key.encrypt_files(
+            [{'file': __file__}, {'file': __file__}, {'file': __file__}],
+            DECRYPTED_DATA_DIR
+        )
+        [os.remove(file) for file in set(_encrypted)]
+
+    def test_rewrap_data_batch(self, encryption_key: TransitKey):
+        data = ['test', 'lol', 'qwe']
+        encrypted_batch = encryption_key.encrypt_batch(data)
+        encryption_key.rotate_key()
+        rewrapped = encryption_key.rewrap_data_batch(encrypted_batch)
+        decrypted = encryption_key.decrypt_batch(rewrapped, encoding='utf8')
+
+        assert decrypted == data
+
+    def test_rewrap_data(self, encryption_key: TransitKey):
+        data = 'text'
+        encrypted_data = encryption_key.encrypt_data(data, context='ct1', nonce='n1')
+        encryption_key.rotate_key()
+        rewrapped_data = encryption_key.rewrap_data(encrypted_data, context='ct1', nonce='n1')
+        decrypted_data = encryption_key.decrypt_data(rewrapped_data, encoding='utf8')
+        assert data == decrypted_data
+
+    def test_sign(self, signing_key: TransitKey):
+        data = 'qwerty123'
+        signing_key.sign(data)
+
+    def test_export_key(self, signing_key: TransitKey, encryption_key: TransitKey):
+        signing_key.export_key(TransitKey.ExportKeyType.HMAC_KEY)
+        signing_key.export_key(TransitKey.ExportKeyType.SIGNING_KEY)
+
+        encryption_key.export_key(TransitKey.ExportKeyType.HMAC_KEY)
+        encryption_key.export_key(TransitKey.ExportKeyType.ENCRYPTION_KEY)
+
+        with pytest.raises(Exception):
+            signing_key.export_key(TransitKey.ExportKeyType.ENCRYPTION_KEY)
+
+        with pytest.raises(Exception):
+            encryption_key.export_key(TransitKey.ExportKeyType.SIGNING_KEY)
+
+    def test_rewrap_encrypted_files(self, encryption_key: TransitKey):
+        _encrypted = encryption_key.encrypt_files(
+            [{'file': __file__}, {'file': __file__}, {'file': __file__}],
+            DECRYPTED_DATA_DIR, do_encrypt_file_names=True
+        )
+        encryption_key.rotate_key()
+
+        [os.remove(file) for file in _encrypted]
