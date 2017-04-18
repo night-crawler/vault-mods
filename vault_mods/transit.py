@@ -332,6 +332,53 @@ class TransitKey(VaultAPIBase):
 
     # ------------------------------------------------------------------------------------------------------------------
     # ---------------- encrypt_files ----------------
+    @staticmethod
+    def handle_encrypt_files(file_bundles_list: t.List[str_dict_or_str],
+                             encrypted_files_data: t.List[str_dict],
+                             encrypted_file_names: t.List[str_dict],
+                             output_dir: str = '',
+                             makedirs: bool = False,
+                             do_encrypt_file_names: bool = False,
+                             output_filename_template: str = '%(version)s_%(filename)s.vault',
+                             rewrap=False) -> t.List[str]:
+        encrypted_files = []
+        efn = iter(encrypted_file_names)  # encrypted file name iterator
+        # {file_bundle}, {ciphertext: 123}
+        for bundle, d_data in zip(file_bundles_list, encrypted_files_data):
+            orig_file = os.path.abspath(bundle['file'])
+            orig_dirname, orig_filename = os.path.dirname(orig_file), os.path.basename(orig_file)
+
+            _, version, b64_data = d_data['ciphertext'].split(':')
+            b_data = b64_decode(b64_data)
+
+            if bundle.get('encrypted_file_name', do_encrypt_file_names):
+                _, _, b64_name = next(efn)['ciphertext'].split(':')
+                b_name = b64_decode(b64_name)
+                filename = output_filename_template % {
+                    'filename': b32_encode(b_name).rstrip('='),
+                    'version': version
+                }
+            else:
+                # remove extra version info if rewrap
+                # otherwise we'll get v2_v1_test_transit.py.vault.vault
+                if rewrap:
+                    filename = output_filename_template % {
+                        'filename': orig_filename.split('_', 1)[1].split('.vault')[0],
+                        'version': version
+                    }
+                else:
+                    filename = output_filename_template % {'filename': orig_filename, 'version': version}
+
+            _output_dir = bundle.get('output_dir', output_dir)
+            if makedirs:
+                os.makedirs(_output_dir, exist_ok=True)
+
+            _file = os.path.join(_output_dir, filename)
+            with open(_file, 'wb') as f:
+                f.write(b_data)
+            encrypted_files.append(_file)
+        return encrypted_files
+
     def encrypt_files(self,
                       file_bundles_list: t.List[str_dict_or_str],
                       output_dir: str = '',
@@ -348,7 +395,7 @@ class TransitKey(VaultAPIBase):
                 'data_nonce': 'n1',
                 'name_context': 'ct2', # context should be set either in all the request blocks or in none
                 'name_nonce': 'n2',
-                'encrypt_file_name': True
+                'encrypted_file_name': True
             },
         ]
         :param output_dir: default output dir for encrypted files
@@ -367,37 +414,15 @@ class TransitKey(VaultAPIBase):
         if makedirs:
             os.makedirs(output_dir, exist_ok=True)
 
-        encrypted_files = []
-        efn_i = 0  # encrypted file name index
-        # {file_bundle}, {ciphertext: 123}
-        for bundle, d_data in zip(file_bundles_list, encrypted_files_data):
-            orig_file = os.path.abspath(bundle['file'])
-            orig_dirname, orig_filename = os.path.dirname(orig_file), os.path.basename(orig_file)
-
-            _, version, b64_data = d_data['ciphertext'].split(':')
-            b_data = b64_decode(b64_data)
-
-            if bundle.get('encrypt_file_name', do_encrypt_file_names):
-                d_name = encrypted_file_names[efn_i]
-                efn_i += 1
-                _, _, b64_name = d_name['ciphertext'].split(':')
-                b_name = b64_decode(b64_name)
-                filename = output_filename_template % {
-                    'filename': b32_encode(b_name).rstrip('='),
-                    'version': version
-                }
-            else:
-                filename = output_filename_template % {'filename': orig_filename, 'version': version}
-
-            _output_dir = bundle.get('output_dir', output_dir)
-            if makedirs:
-                os.makedirs(_output_dir, exist_ok=True)
-
-            _file = os.path.join(_output_dir, filename)
-            with open(_file, 'wb') as f:
-                f.write(b_data)
-            encrypted_files.append(_file)
-        return encrypted_files
+        return self.handle_encrypt_files(
+            file_bundles_list=file_bundles_list,
+            encrypted_files_data=encrypted_files_data,
+            encrypted_file_names=encrypted_file_names,
+            output_dir=output_dir,
+            makedirs=makedirs,
+            do_encrypt_file_names=do_encrypt_file_names,
+            output_filename_template=output_filename_template
+        )
 
     def encrypt_files_task(self,
                            file_bundles_list: t.List[str_dict_or_str],
@@ -425,7 +450,7 @@ class TransitKey(VaultAPIBase):
                 'context': bundle.get('data_context'),
                 'nonce': bundle.get('data_nonce')
             })
-            if bundle.get('encrypt_file_name', do_encrypt_file_names):
+            if bundle.get('encrypted_file_name', do_encrypt_file_names):
                 batch_file_names.append({
                     'plaintext': filename,
                     'context': bundle.get('name_context'),
@@ -452,7 +477,7 @@ class TransitKey(VaultAPIBase):
             os.makedirs(output_dir, exist_ok=True)
 
         decrypted_files = []
-        dfn_i = 0  # decrypted file name index
+        dfn = iter(decrypted_file_names)  # decrypted file name iterator
         for bundle, d_data in zip(file_bundles_list, decrypted_files_data):
             abspath = os.path.abspath(bundle['file'])
             version, filename = os.path.basename(abspath).split('_', 1)
@@ -460,9 +485,8 @@ class TransitKey(VaultAPIBase):
             dirname = os.path.dirname(abspath)
             b_data = b64_decode(d_data['plaintext'])
 
-            if bundle.get('decrypt_file_name', do_decrypt_file_names):
-                filename = b64_decode(decrypted_file_names[dfn_i]['plaintext'], 'utf8')
-                dfn_i += 1
+            if bundle.get('encrypted_file_name', do_decrypt_file_names):
+                filename = b64_decode(next(dfn)['plaintext'], 'utf8')
 
             _output_dir = bundle.get('output_dir', output_dir) or dirname
             if makedirs:
@@ -488,7 +512,7 @@ class TransitKey(VaultAPIBase):
                 'context': bundle.get('data_context'),
                 'nonce': bundle.get('data_nonce')
             })
-            if bundle.get('decrypt_file_name', do_decrypt_file_names):
+            if bundle.get('encrypted_file_name', do_decrypt_file_names):
                 filename_ciphertext = ':'.join([
                     'vault',
                     version,
@@ -609,15 +633,35 @@ class TransitKey(VaultAPIBase):
         }, method='post')
 
     # ------------------------------------------------------------------------------------------------------------------
-    # ----------------  ----------------
+    # ---------------- rewrap_encrypted_files ----------------
     def rewrap_encrypted_files(self,
                                file_bundles_list: t.List[str_dict],
-                               do_rewrap_file_names: bool = False):
+                               output_dir: str = '',
+                               makedirs: bool = False,
+                               do_rewrap_file_names: bool = False,
+                               output_filename_template: str = '%(version)s_%(filename)s.vault'):
         response = self.af.go_single(
             self.rewrap_encrypted_files_task(file_bundles_list, do_rewrap_file_names)
         )
         if not is_success(response.status):
             raise Exception(response)
+        batch_results = response.result['data']['batch_results']
+        encrypted_files_data = batch_results[:len(file_bundles_list)]
+        encrypted_file_names = batch_results[len(file_bundles_list):]
+        if makedirs:
+            os.makedirs(output_dir, exist_ok=True)
+
+        # same as encrypt
+        return self.handle_encrypt_files(
+            file_bundles_list=file_bundles_list,
+            encrypted_files_data=encrypted_files_data,
+            encrypted_file_names=encrypted_file_names,
+            output_dir=output_dir,
+            makedirs=makedirs,
+            do_encrypt_file_names=do_rewrap_file_names,
+            output_filename_template=output_filename_template,
+            rewrap=True
+        )
 
     def rewrap_encrypted_files_task(self,
                                     file_bundles_list: t.List[str_dict],

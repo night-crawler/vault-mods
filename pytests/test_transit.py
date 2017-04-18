@@ -8,6 +8,7 @@ from . import settings
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, os.path.pardir, 'test_data'))
 DECRYPTED_DATA_DIR = os.path.join(DATA_DIR, 'decrypted')
+REWRAP_DATA_DIR = os.path.join(DATA_DIR, 'rewrap')
 
 
 @pytest.fixture(scope='module')
@@ -124,25 +125,25 @@ class TransitAPITest:
                 'data_nonce': 'n1',
                 'name_context': 'ct2',
                 'name_nonce': 'n2',
-                'encrypt_file_name': True
+                'encrypted_file_name': True
             },
         ]
-        res = encryption_key.encrypt_files(files, makedirs=True, output_dir=DATA_DIR)
+        _encrypted = encryption_key.encrypt_files(files, makedirs=True, output_dir=DATA_DIR)
         decrypt_files = [
             {
-                'file': res[0],
+                'file': _encrypted[0],
                 'data_context': 'ct1',
                 'data_nonce': 'n1',
                 'name_context': 'ct2',
                 'name_nonce': 'n2',
             },
             {
-                'file': res[1],
+                'file': _encrypted[1],
                 'data_context': 'ct1',
                 'data_nonce': 'n1',
                 'name_context': 'ct2',
                 'name_nonce': 'n2',
-                'decrypt_file_name': True
+                'encrypted_file_name': True
             },
         ]
 
@@ -152,6 +153,7 @@ class TransitAPITest:
             makedirs=True
         )
         [os.remove(file) for file in set(_decrypted)]
+        [os.remove(file) for file in set(_encrypted)]
 
         _encrypted = encryption_key.encrypt_files(
             [{'file': __file__}, {'file': __file__}, {'file': __file__}],
@@ -195,9 +197,44 @@ class TransitAPITest:
 
     def test_rewrap_encrypted_files(self, encryption_key: TransitKey):
         _encrypted = encryption_key.encrypt_files(
-            [{'file': __file__}, {'file': __file__}, {'file': __file__}],
-            DECRYPTED_DATA_DIR, do_encrypt_file_names=True
+            [{'file': __file__}],
+            DATA_DIR, do_encrypt_file_names=True
         )
         encryption_key.rotate_key()
+        _rewrapped = encryption_key.rewrap_encrypted_files(
+            [{'file': f} for f in _encrypted],
+            do_rewrap_file_names=True,
+            output_dir=REWRAP_DATA_DIR,
+            makedirs=True
+        )
 
-        [os.remove(file) for file in _encrypted]
+        _decrypted = encryption_key.decrypt_files(
+            [{'file': f} for f in _rewrapped],
+            makedirs=True,
+            output_dir=DECRYPTED_DATA_DIR,
+            do_decrypt_file_names=True
+        )
+
+        [os.remove(file) for file in set(_encrypted)]
+        [os.remove(file) for file in set(_decrypted)]
+        [os.remove(file) for file in set(_rewrapped)]
+
+        _encrypted = encryption_key.encrypt_files(
+            [{'file': __file__}],
+            DATA_DIR, do_encrypt_file_names=False
+        )
+        encryption_key.rotate_key()
+        _rewrapped = encryption_key.rewrap_encrypted_files(
+            [{'file': f} for f in _encrypted],
+            output_dir=REWRAP_DATA_DIR,
+            makedirs=True
+        )
+        _decrypted = encryption_key.decrypt_files(
+            [{'file': f} for f in _rewrapped],
+            makedirs=True,
+            output_dir=DECRYPTED_DATA_DIR,
+        )
+
+        [os.remove(file) for file in set(_encrypted)]
+        [os.remove(file) for file in set(_decrypted)]
+        [os.remove(file) for file in set(_rewrapped)]
